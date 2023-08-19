@@ -1,2 +1,4 @@
 # Headlines-sentiment-tool
-this projet is intended to fetch news headlines online trhough the API " NewscatcherAPI "  analyzes and emerges the general sentiment of the recovered headlines using the machine learning model I created
+here is my final school projet where i created a ML model which analyze and give the overall sentiment 
+over a list of headlines fetched through a request with the " NewscatcherAPI " [](https://newscatcherapi.com/) 
+where you can make a request by a keyword, topic and more interesting params
