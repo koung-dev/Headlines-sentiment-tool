@@ -1,0 +1,252 @@
+import streamlit as st
+# import newscatcherapi
+from newsapi import NewsApiClient
+import smtplib
+from smtplib import SMTP_SSL
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.message import EmailMessage
+import time
+import datetime
+# from Acceuil import sentiment, analyze_sentiment, newscatcherapi
+from Acceuil import sentiment, analyze_sentiment
+import json
+from json import JSONDecodeError
+import os.path
+import pandas as pd
+import re
+from streamlit.components.v1 import html
+
+
+newsapi = NewsApiClient(api_key='beab2130cda447d4b451d64146ea0780')
+st.markdown('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">', unsafe_allow_html=True)
+
+def send_mail(recipient_email,message):
+                    sender_email= 'market.analyzing.ml@gmail.com'
+                    sender_password= 'pqnkxzljiykjraun'
+                    subject= 'Alerte'
+                    msg= MIMEMultipart()
+                    # msg.set_content()
+                    msg['subject']= subject
+                    msg['to'] = recipient_email
+                    msg.attach(MIMEText(message, 'plain'))
+                    server =smtplib.SMTP('smtp.gmail.com', 587)
+                    server.starttls()
+                    server.login(sender_email, sender_password)
+                    server.send_message(msg)
+
+                    server.quit()
+
+# def alert_articles(alert_keyword, alert_topic):
+#   all_articles = newscatcherapi.get_search(q= alert_keyword,
+#                                 lang='en',
+#                                 topic= alert_topic,
+#                                 from_ = '1 hr ago',
+#                                 from_rank= 1,
+#                                 #countries= 'US',
+#                                 to_rank= 1000,
+#                                 sort_by= 'relevancy',
+#                                 page_size=100)
+def alert_articles(alert_keyword, alert_topic, country_alert):
+  try:
+      all_articles = newsapi.get_top_headlines(q= alert_keyword,
+                                        category= alert_topic,
+                                        language='en',
+                                        country=country_alert)    
+  except Exception as e:
+      print(e)
+      return None
+  return all_articles
+
+alerts = [] 
+def add_alert(email,keyword, topic, start, end):
+  alert = {
+    'Email': email,
+    'keyword': keyword,
+    'topic': topic,
+    'start': start,
+    'end': end
+  }
+  alerts.append(alert)
+  save_alerts()
+
+def delete_alert(alert_to_delete):
+    # Load alerts from the JSON file
+    with open("alerts.json", "r") as f:
+        alerts = json.load(f)
+
+    # Remove the alert with the specified email
+    updated_alerts = [alert for alert in alerts if alert['Email'] != alert_to_delete['Email']]
+
+    # Save the updated alerts back to the JSON file
+    with open("alerts.json", "w") as f:
+        json.dump(updated_alerts, f, indent=4)
+    # Trigger rerun to refresh the display
+    st.experimental_rerun()
+
+def save_alerts():
+  # if not os.path.exists('alerts.json'): 
+  #   alerts = [] # liste vide
+
+  with open('alerts.json', 'w') as f:
+    json.dump(alerts, f)
+
+def load_alerts():
+  try:
+    with open('alerts.json', "r") as f:
+      alerts = json.load(f) 
+  except JSONDecodeError:
+    alerts = []
+  return alerts
+  # with open('alerts.json') as f:
+  #   return json.load(f)
+# ya des modifications a faire dans cette classe au niveau 
+# de l'email de l'entreprise qui envoi le mail aux users
+
+def alerte(keyword, related_topic, country_alert, email_user, start, end):
+
+  now = datetime.datetime.now().hour
+  # while now >= start and now <= end:
+  while start < now < end:
+    # if now >= start and now <= end:
+    if start < now < end:
+        
+      all_articles= alert_articles(keyword.lower(),related_topic.lower(), country_alert)
+      if all_articles['totalResults'] ==  0 :
+        pass
+      
+      else :
+          # all articles titles
+          alert_titles= [articles['title'] for articles in all_articles ['articles']]
+          alert_sentiment= analyze_sentiment(alert_titles)
+          if alert_sentiment == "No titles":
+            st.warning("No articles found")
+          # send email notification
+          else :
+              # modifie les infos de ce mail en les remplaçant par les infos mail de l'entreprise
+              recipient_email = email_user
+              message= f'Actif: {keyword} thème: {topic} sentiment: {sentiment}'
+              send_mail(recipient_email,message)
+
+    time_left = (end - now)
+    time.sleep(time_left) # Attendre 1h
+    now = datetime.datetime.now().hour
+
+# def set_alert_period():
+#   now = datetime.datetime.now()
+#   min_hour = now.hour
+#   period = st.slider("Définir la période d'alerte", 
+#                     min_value=min_hour, max_value=24, value=(min_hour, min_hour+3),
+#                     help="Choisissez la période d'alerte en heures (min 0h, max 24h)")
+#   start_hour = period[0]
+#   end_hour = period[1]
+  
+#   return start_hour, end_hour
+def set_alert_period():
+    now = datetime.datetime.now()
+    min_hour = now.hour
+    period = st.slider("Définir la période d'alerte", 
+                        min_value=min_hour, max_value=24, value=(min_hour, min_hour+3),
+                        help="Choisissez la période d'alerte en heures (min 0h, max 24h)")
+    start_hour = period[0]
+    end_hour = period[1]
+    
+    # Convertir les heures de début et de fin en secondes depuis minuit
+    start_seconds = start_hour * 3600
+    end_seconds = end_hour * 3600
+
+    return start_seconds, end_seconds
+
+
+if not os.path.exists('alerts.json'):
+   # Le fichier n'existe pas, on le crée
+   save_alerts()
+
+# valid_topics = ['news', 'sport', 'tech', 'world', 'finance', 'politics', 
+#                 'business', 'economics', 'entertainment', 'beauty', 
+#                 'travel', 'music', 'food', 'science', 'gaming', 'energy']
+valid_topics = ["entertainment","general", "health","science","sport","technologie","business"]
+
+with st.form("alert_form"):
+  keyword = st.text_input("actif", placeholder="Entrez l'actif à surveiller").lower()
+
+  topic = st.text_input("cathégorie",placeholder="Entrez le thème").lower()
+  email = st.text_input("Email",placeholder="Entrez votre Email").lower()
+  country = st.selectbox('Pays', ['us','ru','gb','ca','ru','ch','ua',"fr"])
+  start, end = set_alert_period()
+  submit = st.form_submit_button("Créer")
+
+# creation de la side bar
+st.sidebar.header("Sentiment Tools `Version 1 by Tamfu`")
+with st.sidebar:
+  # with st.sidebar.expander("Alertes"):
+  #   # show_table = st.checkbox("Voir les alertes")
+  show_table = st.checkbox("les alertes") 
+
+duration= end-start
+email_regex = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+confirmation_msg= "Votre alerte a été placé"
+
+if submit:
+  if topic not in valid_topics:
+    st.error("Thème invalide")
+  elif not re.fullmatch(email_regex, email):
+    st.error("email invalide")
+  else:
+    # alert= Alert(duration)
+    send_mail(email,confirmation_msg)
+    alerte(keyword,topic,country,email,start,end)
+    st.success("Alerte créée")
+    add_alert(email,keyword, topic, start, end) # Appeler la fonction pour ajouter l'alerte
+
+# if show_table:
+#   # Charger les alertes
+#   alerts = load_alerts()
+#   cols = ["Email","Actif", "Thème", "Heure Début", "Heure Fin", "Statut"]
+#   rows = []
+#   if alerts:
+#     for alert in alerts:
+#       row = [alert['Email'],alert['keyword'], alert['topic'], alert['start'],alert['end']]
+#       # Calculer le statut
+#       now_ts = datetime.datetime.now().timestamp()
+#       start_ts = int(alert['start']) * 3600  
+#       end_ts = int(alert['end']) * 3600
+#       if start_ts < now_ts < end_ts:
+#         status = 'Active'
+#       else:
+#         status = 'Inactive'
+#       row.append(status) 
+#       rows.append(row)
+  # else:
+  #   rows = [["" for col in cols]]
+  # # Générer le tableau
+  # df = pd.DataFrame(rows, columns=cols)
+  # st.dataframe(df)
+
+if show_table:
+  # Charger les alertes
+  alerts = load_alerts()
+  cols = ["Email","Actif", "Thème", "Heure Début", "Heure Fin", "Statut"]
+  rows = []
+  for alert in alerts:
+      # Calculer le statut
+      # now_ts = datetime.datetime.now().timestamp()
+      # start_ts = int(alert['start']) * 3600
+      # end_ts = int(alert['end']) * 3600
+      now_ts = datetime.datetime.now().hour * 3600 + datetime.datetime.now().minute * 60 + datetime.datetime.now().second
+      start_ts = int(alert['start'])
+      end_ts = int(alert['end'])
+      if start_ts <= now_ts <= end_ts:
+          status = '✔️'
+      else:
+          status = '❌'
+      
+      with st.expander(f"Alerte: {status}"):
+          st.write(f"Actif: {alert['keyword']}")
+          st.write(f"Cathégorie: {alert['topic']}")
+          st.write(f"Email: {alert['Email']}")
+
+          if st.button("🗑️"):
+            # Implement your delete_alert function here
+            delete_alert(alert)
+            st.success("Alerte supprimée!")
